@@ -2,15 +2,10 @@
  * API Service — Frontend HTTP client
  * 
  * Centralized API calls to the backend.
- * Uses VITE_API_BASE_URL if set, otherwise falls back to the production Render URL.
- * Only uses the local /api proxy when running the Vite dev server (import.meta.env.DEV).
+ * Uses the Vite proxy to forward /api requests to the backend.
  */
 
-const PROD_BACKEND = 'https://splitbit.onrender.com';
-
-const API_BASE = import.meta.env.DEV
-  ? '/api'
-  : `${import.meta.env.VITE_API_BASE_URL || PROD_BACKEND}/api`;
+const API_BASE = '/api';
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
