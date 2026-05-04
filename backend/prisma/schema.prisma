@@ -1,0 +1,159 @@
+// Prisma schema for Smart Bill Splitter
+// Defines the complete data model for bills, users, groups, and settlements
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── User Model ───────────────────────────────────────────────
+// Represents a participant in the bill-splitting system
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  groupMemberships GroupMember[]
+  billParticipants BillParticipant[]
+  settlementsOwed  Settlement[]      @relation("SettlementFrom")
+  settlementsOwing Settlement[]      @relation("SettlementTo")
+  ownedGroups      Group[]           @relation("GroupOwner")
+  ownedBills       Bill[]            @relation("BillOwner")
+}
+
+// ─── Group Model ──────────────────────────────────────────────
+// A group of friends who split bills together
+model Group {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  userId    String
+
+  // Relations
+  members GroupMember[]
+  bills   Bill[]
+  user    User @relation("GroupOwner", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Group Member Model ───────────────────────────────────────
+// Junction table linking users to groups with their diet preference
+model GroupMember {
+  id       String   @id @default(uuid())
+  groupId  String
+  userId   String
+  dietType DietType @default(NON_VEG)
+
+  // Relations
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+}
+
+// ─── Bill Model ───────────────────────────────────────────────
+// Represents a single bill that needs to be split
+model Bill {
+  id            String      @id @default(uuid())
+  groupId       String?
+  userId        String
+  imagePath     String?
+  merchantName  String?
+  rawText       String?     // OCR extracted text
+  totalAmount   Float       @default(0)
+  subtotal      Float       @default(0)
+  taxAmount     Float       @default(0)
+  serviceCharge Float       @default(0)
+  tipAmount     Float       @default(0)
+  splitMethod   SplitMethod @default(VEG_NONVEG)
+  status        BillStatus  @default(PENDING)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  group        Group?            @relation(fields: [groupId], references: [id])
+  owner        User              @relation("BillOwner", fields: [userId], references: [id], onDelete: Cascade)
+  items        BillItem[]
+  participants BillParticipant[]
+  settlements  Settlement[]
+}
+
+// ─── Bill Item Model ──────────────────────────────────────────
+// Individual line item on a bill
+model BillItem {
+  id       String       @id @default(uuid())
+  billId   String
+  name     String
+  price    Float
+  quantity Int          @default(1)
+  category ItemCategory @default(SHARED)
+
+  // Relations
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+}
+
+// ─── Bill Participant Model ───────────────────────────────────
+// Links a user to a bill with their calculated amount owed
+model BillParticipant {
+  id        String   @id @default(uuid())
+  billId    String
+  userId    String
+  dietType  DietType
+  amountOwed Float   @default(0)
+
+  // Relations
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([billId, userId])
+}
+
+// ─── Settlement Model ─────────────────────────────────────────
+// Records who owes whom and whether it's been settled
+model Settlement {
+  id         String  @id @default(uuid())
+  billId     String
+  fromUserId String
+  toUserId   String
+  amount     Float
+  settled    Boolean @default(false)
+  settledAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  bill     Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  fromUser User @relation("SettlementFrom", fields: [fromUserId], references: [id])
+  toUser   User @relation("SettlementTo", fields: [toUserId], references: [id])
+}
+
+// ─── Enums ────────────────────────────────────────────────────
+
+enum DietType {
+  VEG
+  NON_VEG
+}
+
+enum SplitMethod {
+  EQUAL
+  VEG_NONVEG
+  CUSTOM
+}
+
+enum ItemCategory {
+  VEG
+  NON_VEG
+  SHARED
+}
+
+enum BillStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
