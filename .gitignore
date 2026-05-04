@@ -9,6 +9,6 @@ backend/prisma/*.db
 backend/prisma/*.db-journal
 backend/prisma/migrations/
 
-# Frontend env
+# Frontend env (local only — .env.production IS committed intentionally)
 frontend/.env
 frontend/.env.local
