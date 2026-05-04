@@ -2,10 +2,12 @@
  * API Service — Frontend HTTP client
  * 
  * Centralized API calls to the backend.
- * Uses the Vite proxy to forward /api requests to the backend.
+ * Uses VITE_API_BASE_URL in production, falls back to /api proxy in dev.
  */
 
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL
+  ? `${import.meta.env.VITE_API_BASE_URL}/api`
+  : '/api';
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;

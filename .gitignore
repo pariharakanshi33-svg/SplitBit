@@ -8,3 +8,7 @@ uploads/
 backend/prisma/*.db
 backend/prisma/*.db-journal
 backend/prisma/migrations/
+
+# Frontend env
+frontend/.env
+frontend/.env.local
