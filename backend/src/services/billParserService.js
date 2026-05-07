@@ -41,6 +41,12 @@ class BillParserService {
       /\bbengaluru\b/i, /\d{6}/, /\btoken\b/i, /sn\./i, /sr\./i, /s\.no/i, /waseeb/i,
       /\bpax\b/i, /\bguests?\b/i
     ];
+
+    // Menu section boundary headers
+    this.menuHeaderKeywords = ['item', 's.no', 'qty', 'rate', 'amount', 'description', 'particulars'];
+    
+    // Explicit phone pattern check (e.g. +91 98765 43210, 9876543210)
+    this.phonePattern = /(?:\+?91[\s-]*)?\d{5}[\s-]*\d{5}|\b\d{10}\b/;
   }
 
   /**
@@ -70,20 +76,42 @@ class BillParserService {
     };
 
     let firstValidLine = null;
+    let inMenuSection = false;
+    let foundSubtotalOrTax = false;
+    const rawLogs = [];
 
     for (const line of lines) {
       const lowerLine = line.toLowerCase();
+      rawLogs.push(line);
       
       if (!firstValidLine && !this._shouldSkipLine(lowerLine)) {
         firstValidLine = line;
       }
 
-      // Check for special line types (tax, total, etc.) FIRST
-      // This prevents skipping lines that contain both a skip keyword and a total (e.g. "Thank you Grand Total")
+      // 1. Check for section boundaries
+      // If we hit a subtotal, tax, or total keyword, we are definitely out of the menu section
+      if (this.subtotalKeywords.some(kw => lowerLine.includes(kw)) ||
+          this.taxKeywords.some(kw => lowerLine.includes(kw)) ||
+          this.totalKeywords.some(kw => lowerLine.includes(kw))) {
+        foundSubtotalOrTax = true;
+        inMenuSection = false; // Stop parsing items
+      }
+
+      // 2. Extract special lines first (this safely extracts subtotal/tax even when mixed with noise)
       if (this._tryExtractSpecialLine(lowerLine, line, result)) continue;
 
       // Skip irrelevant lines (headers, footers, metadata)
-      if (this._shouldSkipLine(lowerLine)) continue;
+      if (this._shouldSkipLine(lowerLine) || this.phonePattern.test(lowerLine)) continue;
+
+      // 3. Detect Menu Header Row to start parsing
+      if (!foundSubtotalOrTax && this.menuHeaderKeywords.some(kw => lowerLine.includes(kw))) {
+        inMenuSection = true;
+        continue;
+      }
+
+      // Fallback: If we haven't seen a subtotal yet, we aggressively parse items just in case the header was missed.
+      // But once we see a subtotal, we strictly stop.
+      if (foundSubtotalOrTax) continue;
 
       // Try to extract as a regular item
       const item = this._tryExtractItem(line);
@@ -93,8 +121,20 @@ class BillParserService {
     }
 
     // Calculate subtotal from items if not explicitly found
+    let computedItemsSum = result.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    
     if (result.subtotal === 0 && result.items.length > 0) {
-      result.subtotal = result.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      result.subtotal = computedItemsSum;
+    }
+
+    // Validation: The parsed items should roughly equal the subtotal (allowing for +/- 10 margin for minor OCR float drift)
+    if (result.items.length > 0 && result.subtotal > 0) {
+      if (Math.abs(computedItemsSum - result.subtotal) > 10) {
+        console.error('❌ OCR VALIDATION FAILED:');
+        console.error(`Parsed Items Sum: ₹${computedItemsSum} !== Subtotal: ₹${result.subtotal}`);
+        console.error('Raw OCR text:\n', rawLogs.join('\n'));
+        throw new Error(`Bill parsing validation failed. Extracted items total (₹${computedItemsSum}) does not match the bill's subtotal (₹${result.subtotal}). This usually means a phone number or metadata was misread as a price. Please use manual entry.`);
+      }
     }
 
     // If total not found, calculate it
@@ -253,8 +293,16 @@ class BillParserService {
   _extractPrice(line) {
     const match = line.match(/[\$₹]?\s*([\d,]+\.?\d*)[^\d]*$/i);
     if (match) {
-      const price = parseFloat(match[1].replace(/,/g, ''));
-      if (price > 0) return price;
+      const priceStr = match[1].replace(/,/g, '');
+      
+      // Reject 10+ digit numbers (phone numbers, IDs)
+      if (priceStr.replace('.', '').length >= 10) return null;
+      
+      const price = parseFloat(priceStr);
+      
+      // Reject unrealistic prices > ₹5000 for a single item/tax line 
+      // (prevents phone numbers like 98765 -> 98765.00)
+      if (price > 0 && price <= 5000) return price;
     }
     return null;
   }
