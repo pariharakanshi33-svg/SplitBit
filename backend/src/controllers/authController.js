@@ -24,27 +24,38 @@ class AuthController {
         return res.status(400).json({ error: 'name and email are required' });
       }
 
-      // Check if a stub user exists with this email (added as a friend before signing up)
-      const stubUser = await prisma.user.findFirst({
-        where: { email, clerkId: null },
+      // Look for an existing user either by their Clerk ID or their Email
+      let user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { clerkId: clerkId },
+            { email: email }
+          ]
+        }
       });
 
-      let user;
-
-      if (stubUser) {
-        // Claim the stub account — link it to this Clerk ID
+      if (user) {
+        // If the user exists (either they logged in before, or a stub was created with their email)
+        // Update their details safely, attaching the clerkId if it was missing
         user = await prisma.user.update({
-          where: { id: stubUser.id },
-          data: { clerkId, name },
+          where: { id: user.id },
+          data: {
+            clerkId,
+            name,
+            email // Ensure their latest email from Clerk is synced
+          },
         });
-        console.log(`🔗 Claimed stub user ${stubUser.id} with Clerk ID ${clerkId}`);
+        console.log(`🔗 Synced existing user ${user.id} (Email: ${user.email}) with Clerk ID ${clerkId}`);
       } else {
-        // Upsert by clerkId (handles re-logins gracefully)
-        user = await prisma.user.upsert({
-          where: { clerkId },
-          update: { name, email },
-          create: { clerkId, name, email },
+        // Completely new user
+        user = await prisma.user.create({
+          data: {
+            clerkId,
+            name,
+            email
+          },
         });
+        console.log(`✨ Created fresh user ${user.id} with Clerk ID ${clerkId}`);
       }
 
       res.json({
