@@ -27,14 +27,11 @@ class OcrService {
       return this._extractWithTesseract(imagePath);
     }
 
-    console.log(`🔍 Step 1: Running local Tesseract OCR...`);
-    const tesseractText = await this._extractWithTesseract(imagePath);
-
-    console.log(`🔍 Step 2: Enhancing with Gemini Vision for color symbols...`);
-    return this._extractWithGeminiHybridWithRetries(imagePath, tesseractText);
+    console.log(`⚡ Running lightning-fast Gemini Vision OCR...`);
+    return this._extractWithGeminiDirectWithRetries(imagePath);
   }
 
-  async _extractWithGeminiHybridWithRetries(imagePath, tesseractText) {
+  async _extractWithGeminiDirectWithRetries(imagePath) {
     const retries = [3000, 5000, 10000]; // 3s, 5s, 10s backoff
     let attempt = 0;
 
@@ -58,20 +55,15 @@ class OcrService {
 
         const prompt = `
 You are a highly accurate OCR system specialized in Indian restaurant bills.
-Below is the raw text extracted by a basic OCR tool (Tesseract), which has errors and missed all color symbols:
+Please extract all text from this bill image verbatim, maintaining the original layout line-by-line.
 
-=== RAW TESSERACT TEXT ===
-${tesseractText}
-==========================
+CRITICAL REQUIREMENTS:
+1. Indian bills use a green dot/square (🟢) for Vegetarian and a red dot/square (🔴) for Non-Vegetarian.
+2. Look very carefully at the image for every single row.
+3. If you see a GREEN symbol on the row in the image, PREPEND the extracted text line with "[🟢 VEG] ".
+4. If you see a RED symbol on the row in the image, PREPEND the extracted text line with "[🔴 NON-VEG] ".
 
-YOUR TASK:
-1. Fix any typos or garbled text in the Tesseract output using the provided image as the source of truth.
-2. CRITICAL REQUIREMENT: Indian bills use a green dot/square (🟢) for Vegetarian and a red dot/square (🔴) for Non-Vegetarian.
-3. Look very carefully at the image for every single row.
-4. If you see a GREEN symbol on the row in the image, PREPEND the corrected text line with "[🟢 VEG]".
-5. If you see a RED symbol on the row in the image, PREPEND the corrected text line with "[🔴 NON-VEG]".
-
-Output ONLY the final, corrected, and symbol-annotated text. Maintain the original layout.
+Output ONLY the final extracted and symbol-annotated text. Do not add markdown blocks or commentary.
 `;
 
         const response = await this.ai.models.generateContent({
@@ -83,7 +75,7 @@ Output ONLY the final, corrected, and symbol-annotated text. Maintain the origin
         });
 
         const text = response.text;
-        console.log(`✅ Gemini Hybrid OCR complete on attempt ${attempt + 1}.`);
+        console.log(`✅ Gemini Direct OCR complete on attempt ${attempt + 1}.`);
         
         // Pass the retry attempt count back to the controller via a hidden hack or just log it
         this.lastRetryAttempts = attempt; // Storing for debug logs
@@ -101,7 +93,7 @@ Output ONLY the final, corrected, and symbol-annotated text. Maintain the origin
           continue;
         }
 
-        console.error('❌ Gemini Hybrid OCR failed definitively:', msg);
+        console.error('❌ Gemini Direct OCR failed definitively:', msg);
         
         if (isRateLimit) {
           throw new Error(`Gemini Vision API is temporarily overloaded or rate-limited. Please try again shortly. Detailed error: ${msg}`);
