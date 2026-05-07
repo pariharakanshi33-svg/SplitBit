@@ -172,18 +172,25 @@ export default function GroupsPage() {
                     return <button key={u.id} onClick={() => toggleMember(u.id)} className={selected ? 'btn-primary text-sm py-1.5 px-3' : 'btn-secondary text-sm py-1.5 px-3'}>{selected ? '✓ ' : ''}{u.name}</button>;
                   })}
                 </div>
-                {selectedMembers.length > 0 && (
-                  <div className="mt-3 space-y-2 bg-white p-3 rounded border border-slate-200">
-                    {selectedMembers.map(m => (
-                      <div key={m.userId} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="font-medium text-slate-700">{m.name}</span>
-                        <select className="input-field py-1 px-2 text-xs w-28 h-8" value={m.dietType} onChange={e => setSelectedMembers(selectedMembers.map(s => s.userId === m.userId ? {...s, dietType: e.target.value} : s))}>
-                          <option value="VEG">🥬 Veg</option><option value="NON_VEG">🍖 Non-Veg</option>
-                        </select>
-                      </div>
-                    ))}
+                {/* Always show the current user (Creator) */}
+                <div className="mt-3 space-y-2 bg-white p-3 rounded border border-slate-200">
+                  <div className="flex items-center justify-between gap-2 text-sm bg-indigo-50/50 p-2 rounded border border-indigo-100">
+                    <span className="font-medium text-slate-700 flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs">Y</div>
+                      You (Creator)
+                    </span>
+                    <span className="text-xs font-semibold text-indigo-600">Default Member</span>
                   </div>
-                )}
+                  
+                  {selectedMembers.map(m => (
+                    <div key={m.userId} className="flex items-center justify-between gap-2 text-sm p-1">
+                      <span className="font-medium text-slate-700">{m.name}</span>
+                      <select className="input-field py-1.5 px-3 text-sm w-32 bg-white cursor-pointer" value={m.dietType} onChange={e => setSelectedMembers(selectedMembers.map(s => s.userId === m.userId ? {...s, dietType: e.target.value} : s))}>
+                        <option value="VEG">🥬 Veg</option><option value="NON_VEG">🍖 Non-Veg</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
               </div>
               <button onClick={handleCreateGroup} className="btn-primary w-full">Create Group</button>
             </div>
