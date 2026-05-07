@@ -1,8 +1,9 @@
 /**
  * Bill Controller — Handles HTTP requests for bill operations
- * 
- * Orchestrates the full bill processing pipeline:
- * Upload → OCR → Parse → Classify → Split → Store
+ *
+ * SECURITY: All endpoints require authentication.
+ * req.userId is set by requireAuth middleware from the verified Clerk JWT.
+ * Users can only access their own bills.
  */
 
 const path = require('path');
@@ -16,31 +17,16 @@ const billDbService = require('../services/billDbService');
 class BillController {
   /**
    * POST /api/upload-bill
-   * 
-   * Upload a bill image and create a pending bill record.
-   * Optionally includes group ID and participant preferences.
-   * 
-   * Body (multipart/form-data):
-   * - billImage: file
-   * - groupId: string (optional)
-   * - participants: JSON string [{userId, dietType}]
-   * - splitMethod: 'EQUAL' | 'VEG_NONVEG' | 'CUSTOM'
    */
   async uploadBill(req, res) {
     try {
-      // Validate file upload
-      if (!req.file) {
-        return res.status(400).json({ error: 'Bill image is required' });
-      }
+      // req.file is optional if the user is using manual items
+      const imagePath = req.file ? req.file.path : null;
 
-      const { groupId, splitMethod = 'VEG_NONVEG', userId } = req.body;
-      
-      if (!userId) {
-        return res.status(400).json({ error: 'userId is required' });
-      }
+      const { groupId, splitMethod = 'VEG_NONVEG' } = req.body;
+      const userId = req.userId; // ← from requireAuth middleware
 
       let participants = [];
-      
       try {
         participants = req.body.participants ? JSON.parse(req.body.participants) : [];
       } catch (e) {
@@ -50,17 +36,17 @@ class BillController {
       const bill = await billDbService.createBill({
         userId,
         groupId: groupId || null,
-        imagePath: req.file.filename,
+        imagePath: imagePath, // Store the Cloudinary URL or null
         splitMethod,
         status: 'PENDING',
       });
 
-      console.log(`📝 Bill created: ${bill.id}`);
+      console.log(`📝 Bill created: ${bill.id} for user ${userId}`);
 
       res.status(201).json({
         message: 'Bill uploaded successfully',
         bill,
-        nextStep: `POST /api/split with billId: ${bill.id}`
+        nextStep: `POST /api/split with billId: ${bill.id}`,
       });
     } catch (error) {
       console.error('Upload bill error:', error);
@@ -70,7 +56,6 @@ class BillController {
 
   /**
    * POST /api/analyze-bill
-   * Runs OCR and classification without saving
    */
   async analyzeBill(req, res) {
     try {
@@ -79,7 +64,7 @@ class BillController {
       }
 
       console.log('🔍 Running OCR analysis...');
-      const imagePath = path.join(__dirname, '..', '..', 'uploads', req.file.filename);
+      const imagePath = req.file.path; // Cloudinary URL
       const rawText = await ocrService.extractText(imagePath);
       const parsed = billParserService.parse(rawText);
       const items = await classifierService.classifyItems(parsed.items);
@@ -89,7 +74,7 @@ class BillController {
         tax: parsed.tax,
         serviceCharge: parsed.serviceCharge,
         tip: parsed.tip,
-        imagePath: req.file.filename // Send this back so we can use it in split
+        imagePath: req.file.path,
       });
     } catch (error) {
       console.error('Analyze bill error:', error);
@@ -99,19 +84,6 @@ class BillController {
 
   /**
    * POST /api/split
-   * 
-   * Process a bill: OCR → Parse → Classify → Split → Settle
-   * This is the main processing endpoint.
-   * 
-   * Body:
-   * - billId: string (required)
-   * - participants: [{userId, dietType}] (required)
-   * - splitMethod: 'EQUAL' | 'VEG_NONVEG' | 'CUSTOM'
-   * - payerId: string (who paid the bill)
-   * - customAmounts: {userId: amount} (for CUSTOM split)
-   * - manualItems: [{name, price, quantity, category}] (optional, skip OCR)
-   * - manualTax: number (optional)
-   * - manualServiceCharge: number (optional)
    */
   async splitBill(req, res) {
     try {
@@ -128,27 +100,23 @@ class BillController {
         merchantName: manualMerchantName,
       } = req.body;
 
-      // Validate required fields
-      if (!billId) {
-        return res.status(400).json({ error: 'billId is required' });
-      }
+      if (!billId) return res.status(400).json({ error: 'billId is required' });
       if (!participants || participants.length === 0) {
         return res.status(400).json({ error: 'At least one participant is required' });
       }
 
-      // Fetch the bill
+      // Fetch and verify ownership
       let bill = await billDbService.getBillById(billId);
-      if (!bill) {
-        return res.status(404).json({ error: 'Bill not found' });
+      if (!bill) return res.status(404).json({ error: 'Bill not found' });
+      if (bill.userId !== req.userId) {
+        return res.status(403).json({ error: 'Forbidden: This bill does not belong to you' });
       }
 
-      // Update status to processing
       await billDbService.updateBill(billId, { status: 'PROCESSING' });
 
       let items, tax, serviceCharge, tip, merchantName;
 
       if (manualItems && manualItems.length > 0) {
-        // ─── Manual items provided (skip OCR) ──────────────────
         console.log('📋 Using manually provided items');
         items = await classifierService.classifyItems(manualItems);
         tax = manualTax || 0;
@@ -156,38 +124,23 @@ class BillController {
         tip = manualTip || 0;
         merchantName = manualMerchantName || null;
       } else if (bill.imagePath) {
-        // ─── Run OCR Pipeline ──────────────────────────────────
         console.log('🔍 Running OCR pipeline...');
-        const imagePath = path.join(__dirname, '..', '..', 'uploads', bill.imagePath);
-        
-        // Step 1: OCR
+        const imagePath = bill.imagePath; // Cloudinary URL
         const rawText = await ocrService.extractText(imagePath);
-        
-        // Step 2: Parse
         const parsed = billParserService.parse(rawText);
-        
-        // Step 3: Classify items
         items = await classifierService.classifyItems(parsed.items);
         tax = parsed.tax;
         serviceCharge = parsed.serviceCharge;
         tip = parsed.tip;
         merchantName = manualMerchantName || null;
-
-        // Store raw text and merchant name
         await billDbService.updateBill(billId, { rawText, merchantName });
       } else {
-        return res.status(400).json({ 
-          error: 'No bill image or manual items provided. Cannot process.' 
-        });
+        return res.status(400).json({ error: 'No bill image or manual items provided.' });
       }
 
-      // ─── Step 4: Store items in database ────────────────────
       await billDbService.addItems(billId, items);
-
-      // ─── Step 5: Add participants ───────────────────────────
       await billDbService.addParticipants(billId, participants);
 
-      // ─── Step 6: Split the bill ─────────────────────────────
       const splits = splitService.split({
         items,
         participants,
@@ -198,21 +151,18 @@ class BillController {
         customAmounts,
       });
 
-      // Update participant amounts
       await billDbService.updateParticipantAmounts(billId, splits);
 
-      // ─── Step 7: Calculate settlements ──────────────────────
       const settlements = settlementService.calculateSettlements(
         splits,
         payerId || participants[0].userId
       );
       await billDbService.addSettlements(billId, settlements);
 
-      // ─── Step 8: Update bill totals and mark complete ───────
       const subtotal = items.reduce((sum, i) => sum + (i.price * (i.quantity || 1)), 0);
       const totalAmount = subtotal + tax + serviceCharge + tip;
 
-      const completedBill = await billDbService.updateBill(billId, {
+      await billDbService.updateBill(billId, {
         subtotal,
         totalAmount,
         taxAmount: tax,
@@ -220,13 +170,31 @@ class BillController {
         tipAmount: tip,
         splitMethod,
         status: 'COMPLETED',
-        ...(merchantName && { merchantName })
+        ...(merchantName && { merchantName }),
       });
 
-      // Get the full bill with all relations
       const fullBill = await billDbService.getBillById(billId);
-
       console.log(`✅ Bill ${billId} processed successfully!`);
+
+      // Temporary debug logging as requested
+      console.log('\n=== CLASSIFICATION DEBUG OUTPUT ===');
+      items.forEach(item => {
+        let detectedIcon = 'none';
+        if (item.source === 'bill_symbol') {
+          if (item.category === 'VEG') detectedIcon = 'green';
+          else if (item.category === 'NON_VEG') detectedIcon = 'red';
+        }
+        
+        console.log(JSON.stringify({
+          item: item.name,
+          ocr_text: item.name, // Using the clean name as OCR text equivalent for now
+          detected_icon: detectedIcon,
+          classification: item.category ? item.category.toLowerCase() : null,
+          source: item.source || 'ai_fallback',
+          retry_attempts: require('../services/ocrService').lastRetryAttempts || 0
+        }, null, 2));
+      });
+      console.log('===================================\n');
 
       res.json({
         message: 'Bill split successfully',
@@ -241,31 +209,26 @@ class BillController {
           itemBreakdown: classifierService.getSummary(items),
           splits,
           settlements,
-        }
+        },
       });
     } catch (error) {
       console.error('Split bill error:', error);
-      
-      // Try to mark bill as failed
       if (req.body.billId) {
-        try {
-          await billDbService.updateBill(req.body.billId, { status: 'FAILED' });
-        } catch (e) { /* ignore */ }
+        try { await billDbService.updateBill(req.body.billId, { status: 'FAILED' }); } catch (e) {}
       }
-
       res.status(500).json({ error: error.message });
     }
   }
 
   /**
    * GET /api/bill/:id
-   * Fetch a bill with all its details
    */
   async getBill(req, res) {
     try {
       const bill = await billDbService.getBillById(req.params.id);
-      if (!bill) {
-        return res.status(404).json({ error: 'Bill not found' });
+      if (!bill) return res.status(404).json({ error: 'Bill not found' });
+      if (bill.userId !== req.userId) {
+        return res.status(403).json({ error: 'Forbidden' });
       }
       res.json(bill);
     } catch (error) {
@@ -275,16 +238,12 @@ class BillController {
 
   /**
    * GET /api/history
-   * Fetch bill history with optional filters
-   * Query params: groupId, startDate, endDate, limit, offset
+   * Returns only the authenticated user's bills.
    */
   async getHistory(req, res) {
     try {
-      const { userId, groupId, startDate, endDate, limit, offset } = req.query;
-      
-      if (!userId) {
-        return res.status(400).json({ error: 'userId is required to fetch history' });
-      }
+      const { groupId, startDate, endDate, limit, offset } = req.query;
+      const userId = req.userId; // Always scoped to current user
 
       const result = await billDbService.getAllBills({
         userId,
@@ -302,10 +261,14 @@ class BillController {
 
   /**
    * DELETE /api/bill/:id
-   * Delete a bill
    */
   async deleteBill(req, res) {
     try {
+      const bill = await billDbService.getBillById(req.params.id);
+      if (!bill) return res.status(404).json({ error: 'Bill not found' });
+      if (bill.userId !== req.userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
       await billDbService.deleteBill(req.params.id);
       res.json({ message: 'Bill deleted successfully' });
     } catch (error) {

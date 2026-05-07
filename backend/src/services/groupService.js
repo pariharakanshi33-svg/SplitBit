@@ -8,12 +8,18 @@ class GroupService {
   async createGroup({ name, members = [], userId }) {
     if (!userId) throw new Error('userId is required');
 
+    // Ensure the creator is always a member
+    const hasCreator = members.some(m => m.userId === userId);
+    const finalMembers = hasCreator 
+      ? members 
+      : [...members, { userId, dietType: 'NON_VEG' }];
+
     return prisma.group.create({
       data: {
         name,
         userId,
         members: {
-          create: members.map(m => ({
+          create: finalMembers.map(m => ({
             userId: m.userId,
             dietType: m.dietType || 'NON_VEG',
           }))

@@ -7,31 +7,27 @@
  */
 
 const multer = require('multer');
-const path = require('path');
+const { v2: cloudinary } = require('cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '..', '..', 'uploads'));
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `bill-${uniqueSuffix}${ext}`);
+// Configure Cloudinary with env variables
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'splitbit_bills',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'],
+    public_id: (req, file) => `bill-${Date.now()}-${Math.round(Math.random() * 1e9)}`
   }
 });
 
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, WebP, GIF, and BMP are allowed.'), false);
-  }
-};
-
 const upload = multer({
   storage,
-  fileFilter,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB max
   }

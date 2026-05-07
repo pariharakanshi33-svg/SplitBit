@@ -1,5 +1,7 @@
 /**
  * Group Controller — Handles HTTP requests for group operations
+ *
+ * SECURITY: req.userId is set by requireAuth middleware.
  */
 
 const groupService = require('../services/groupService');
@@ -7,13 +9,11 @@ const groupService = require('../services/groupService');
 class GroupController {
   async createGroup(req, res) {
     try {
-      const { name, members = [], userId } = req.body;
-      
+      const { name, members = [] } = req.body;
+      const userId = req.userId; // ← from requireAuth
+
       if (!name) {
         return res.status(400).json({ error: 'Group name is required' });
-      }
-      if (!userId) {
-        return res.status(400).json({ error: 'userId is required' });
       }
 
       const group = await groupService.createGroup({ name, members, userId });
@@ -25,11 +25,7 @@ class GroupController {
 
   async getGroups(req, res) {
     try {
-      const { userId } = req.query;
-      if (!userId) {
-        return res.status(400).json({ error: 'userId is required' });
-      }
-
+      const userId = req.userId; // ← from requireAuth
       const groups = await groupService.getAllGroups(userId);
       res.json(groups);
     } catch (error) {
@@ -52,7 +48,7 @@ class GroupController {
   async addMember(req, res) {
     try {
       const { userId, dietType = 'NON_VEG' } = req.body;
-      
+
       if (!userId) {
         return res.status(400).json({ error: 'userId is required' });
       }
@@ -82,10 +78,9 @@ class GroupController {
       if (!dietType || !['VEG', 'NON_VEG'].includes(dietType)) {
         return res.status(400).json({ error: 'dietType must be VEG or NON_VEG' });
       }
-
       const member = await groupService.updateMemberDiet(
-        req.params.id, 
-        req.params.userId, 
+        req.params.id,
+        req.params.userId,
         dietType
       );
       res.json(member);

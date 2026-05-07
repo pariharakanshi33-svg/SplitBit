@@ -6,12 +6,11 @@ export default function HistoryPage({ onViewBill }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ groupId: '', startDate: '', endDate: '' });
 
-  useEffect(() => { loadBills(); }, []);
-
   const loadBills = async () => {
     setLoading(true);
     try {
       const params = {};
+      // userId is derived from auth token on the backend — not sent from frontend
       if (filter.groupId) params.groupId = filter.groupId;
       if (filter.startDate) params.startDate = filter.startDate;
       if (filter.endDate) params.endDate = filter.endDate;
@@ -20,6 +19,9 @@ export default function HistoryPage({ onViewBill }) {
     } catch (e) { console.error(e); }
     setLoading(false);
   };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+  useEffect(() => { loadBills(); }, []);
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this bill?')) return;

@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 export default function SplitMethodStep({
   splitMethod, setSplitMethod, useManualItems, manualItems, file,

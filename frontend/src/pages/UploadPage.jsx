@@ -31,19 +31,20 @@ export default function UploadPage({ onBillProcessed }) {
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
   const loadData = async () => {
     try {
       const [u, g] = await Promise.all([userApi.getAll(), groupApi.getAll()]);
       setUsers(u);
       setGroups(g);
-    } catch (e) {
-      console.error('Failed to load data:', e);
+    } catch (err) {
+      console.error('Failed to load data:', err);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData();
+  }, []);
 
   const handleFileChange = (e) => {
     const f = e.target.files[0];
@@ -86,7 +87,7 @@ export default function UploadPage({ onBillProcessed }) {
       const members = group.members.map(m => ({ userId: m.userId, name: m.user.name, dietType: m.dietType }));
       setParticipants(members);
       if (members.length > 0) setPayerId(members[0].userId);
-    } catch (e) { setError('Failed to load group members'); }
+    } catch { setError('Failed to load group members'); }
   };
 
   const addManualItem = () => setManualItems([...manualItems, { name: '', price: '', quantity: 1 }]);
@@ -103,7 +104,7 @@ export default function UploadPage({ onBillProcessed }) {
       await userApi.create({ name: newUserName, email: newUserEmail });
       setNewUserName(''); setNewUserEmail(''); setShowNewUser(false);
       await loadData();
-    } catch (e) { setError(e.message); }
+    } catch (err) { setError(err.message); }
   };
 
   const handleProceedToAssignment = async () => {
@@ -121,8 +122,8 @@ export default function UploadPage({ onBillProcessed }) {
       const res = await billApi.analyze(formData);
       setAnalyzedItems(res.items);
       setStep(4);
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setAnalyzing(false);
     }
@@ -154,6 +155,7 @@ export default function UploadPage({ onBillProcessed }) {
       if (file) formData.append('billImage', file);
       formData.append('splitMethod', splitMethod);
       if (selectedGroup) formData.append('groupId', selectedGroup);
+      // userId is NOT sent — server derives it from the auth token
       formData.append('participants', JSON.stringify(participants.map(p => ({ userId: p.userId, dietType: p.dietType }))));
 
       const uploadResult = await billApi.upload(formData);
@@ -188,8 +190,8 @@ export default function UploadPage({ onBillProcessed }) {
 
       const result = await billApi.split(splitData);
       onBillProcessed(result);
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }

@@ -1,18 +1,26 @@
 /**
- * User Routes — API endpoints for user operations
+ * User Routes — Friend/stub user management (protected)
+ * signup/login removed — Clerk handles auth
  */
 
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
+const requireAuth = require('../middleware/requireAuth');
 
-router.post('/signup', (req, res) => userController.signup(req, res));
-router.post('/login', (req, res) => userController.login(req, res));
+// Search for registered SplitBit users by email or name
+router.get('/users/search', requireAuth, (req, res) => userController.searchUsers(req, res));
 
-// Keep existing routes
-router.post('/users', (req, res) => userController.addFriend(req, res));
-router.get('/users', (req, res) => userController.getUsers(req, res));
-router.get('/users/:id', (req, res) => userController.getUser(req, res));
-router.delete('/users/:id', (req, res) => userController.deleteUser(req, res));
+// Add a registered user as a friend/contact
+router.post('/users/contacts', requireAuth, (req, res) => userController.addContact(req, res));
+
+// Get all contacts for the logged in user
+router.get('/users', requireAuth, (req, res) => userController.getUsers(req, res));
+
+// Get a specific user
+router.get('/users/:id', requireAuth, (req, res) => userController.getUser(req, res));
+
+// Delete a user
+router.delete('/users/:id', requireAuth, (req, res) => userController.deleteUser(req, res));
 
 module.exports = router;

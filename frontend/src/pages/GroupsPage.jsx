@@ -11,20 +11,23 @@ export default function GroupsPage() {
   const [expandedGroup, setExpandedGroup] = useState(null);
   const [error, setError] = useState('');
 
-  const [showNewUser, setShowNewUser] = useState(false);
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserEmail, setNewUserEmail] = useState('');
-
-  useEffect(() => { loadData(); }, []);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [searchEmail, setSearchEmail] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const loadData = async () => {
     try {
-      const [g, u] = await Promise.all([groupApi.getAll(), groupApi.getAll(), userApi.getAll()]); // Fix: we only need two calls but let's be careful
       const [gData, uData] = await Promise.all([groupApi.getAll(), userApi.getAll()]);
       setGroups(gData); setUsers(uData);
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
+
+  useEffect(() => { 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData(); 
+  }, []);
 
   const handleCreateGroup = async () => {
     if (!newGroupName) return;
@@ -35,11 +38,24 @@ export default function GroupsPage() {
     } catch (e) { setError(e.message); }
   };
 
-  const handleCreateUser = async () => {
-    if (!newUserName || !newUserEmail) return;
+  const handleSearch = async (e) => {
+    setSearchEmail(e.target.value);
+    if (e.target.value.length > 2) {
+      setSearchLoading(true);
+      try {
+        const results = await userApi.search(e.target.value);
+        setSearchResults(results);
+      } catch { /* ignored */ }
+      setSearchLoading(false);
+    } else {
+      setSearchResults([]);
+    }
+  };
+
+  const handleAddContact = async (email) => {
     try {
-      await userApi.create({ name: newUserName, email: newUserEmail });
-      setNewUserName(''); setNewUserEmail(''); setShowNewUser(false);
+      await userApi.addContact({ email });
+      setSearchEmail(''); setSearchResults([]); setShowAddContact(false);
       await loadData();
     } catch (e) { setError(e.message); }
   };
@@ -76,24 +92,51 @@ export default function GroupsPage() {
       {error && <div className="glass-card mb-4 bg-red-50 border-red-200"><p className="text-red-600">⚠️ {error}</p></div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Users Section */}
+        {/* Users (Contacts) Section */}
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-slate-800">👤 Users ({users.length})</h3>
-            <button onClick={() => setShowNewUser(!showNewUser)} className="btn-secondary text-sm">{showNewUser ? '✕ Cancel' : '+ New User'}</button>
+            <h3 className="text-lg font-bold text-slate-800">👤 Friends ({users.length})</h3>
+            <button onClick={() => setShowAddContact(!showAddContact)} className="btn-secondary text-sm">{showAddContact ? '✕ Cancel' : '+ Add Friend'}</button>
           </div>
 
-          {showNewUser && (
+          {showAddContact && (
             <div className="glass-card mb-4 bg-slate-50">
-              <div className="flex flex-wrap gap-2 items-end">
-                <div className="flex-1 min-w-[120px]"><label className="label">Name</label><input className="input-field" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Name" /></div>
-                <div className="flex-1 min-w-[150px]"><label className="label">Email</label><input className="input-field" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="email@example.com" /></div>
-                <button onClick={handleCreateUser} className="btn-primary">Add</button>
+              <div className="mb-2">
+                <label className="label">Search by Email</label>
+                <div className="flex gap-2">
+                  <input className="input-field flex-1" value={searchEmail} onChange={handleSearch} placeholder="friend@example.com" />
+                  <button onClick={() => handleAddContact(searchEmail)} disabled={!searchEmail || searchLoading} className="btn-primary">Add</button>
+                </div>
               </div>
+              
+              {searchLoading && <p className="text-xs text-slate-500 mt-2">Searching...</p>}
+              
+              {searchResults.length > 0 && (
+                <div className="mt-3 bg-white border border-slate-200 rounded-md overflow-hidden shadow-sm">
+                  {searchResults.map(res => (
+                    <div key={res.id} className="p-2 text-sm border-b border-slate-100 last:border-0 flex justify-between items-center hover:bg-slate-50">
+                      <div>
+                        <div className="font-medium text-slate-800">{res.name}</div>
+                        <div className="text-xs text-slate-500">{res.email}</div>
+                      </div>
+                      <button onClick={() => handleAddContact(res.email)} className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100">Select</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {searchEmail.length > 2 && !searchLoading && searchResults.length === 0 && (
+                <p className="text-xs text-slate-500 mt-2">No registered users found.</p>
+              )}
             </div>
           )}
 
           <div className="space-y-3">
+            {users.length === 0 && !showAddContact && (
+              <div className="text-center p-6 bg-slate-50 border border-slate-200 border-dashed rounded-xl">
+                <p className="text-sm text-slate-500 mb-2">You haven't added any friends yet.</p>
+                <button onClick={() => setShowAddContact(true)} className="btn-secondary text-xs">Search for friends</button>
+              </div>
+            )}
             {users.map(u => (
               <div key={u.id} className="glass-card py-3 px-4 shadow-sm">
                 <div className="flex items-center justify-between">

@@ -27,7 +27,7 @@ class BillParserService {
     this.taxKeywords = ['tax', 'gst', 'vat', 'cgst', 'sgst', 'igst', 'sales tax', 'service tax'];
     this.serviceChargeKeywords = ['service charge', 'service fee', 'svc charge', 'svc chg', 'sc'];
     this.tipKeywords = ['tip', 'gratuity'];
-    this.totalKeywords = ['total', 'grand total', 'net total', 'amount due', 'bill total', 'net amount'];
+    this.totalKeywords = ['total', 'grand total', 'net total', 'amount due', 'bill total', 'net amount', 'bill amount', 'amount paid'];
     this.subtotalKeywords = ['subtotal', 'sub total', 'sub-total', 'food total', 'item total'];
     this.discountKeywords = ['discount', 'disc', 'off', 'promo'];
     
@@ -38,7 +38,8 @@ class BillParserService {
       /\btable/i, /\border\b/i, /\bserver\b/i, /\bcashier\b/i, /\bphone\b/i, /\baddress\b/i,
       /\bfssai\b/i, /\bgstin\b/i, /\btin\b/i, /\bpan\b/i, /\bbill no\b/i, /\bcheck no\b/i,
       /\bpayment\b/i, /\bpaid\b/i, /\bcustomer\b/i, /\bchange due\b/i, /\bcash\b/i, /\bcard\b/i,
-      /\bbengaluru\b/i, /\d{6}/, /\btoken\b/i, /sn\./i, /sr\./i, /s\.no/i, /waseeb/i
+      /\bbengaluru\b/i, /\d{6}/, /\btoken\b/i, /sn\./i, /sr\./i, /s\.no/i, /waseeb/i,
+      /\bpax\b/i, /\bguests?\b/i
     ];
   }
 
@@ -170,20 +171,20 @@ class BillParserService {
 
   /**
    * Try to extract a menu item from a line
-   * @returns {Object|null} - { name, price, quantity } or null
+   * @returns {Object|null} - { name, price, quantity, category, source } or null
    */
   _tryExtractItem(line) {
     // Try quantity pattern first: "2 x Butter Chicken 450"
     const qtyMatch = line.match(/^(\d+)\s*[xX×]\s*(.+?)\s+[\$₹]?\s*([\d,]+\.?\d*)[^\d]*$/i);
     if (qtyMatch) {
       const quantity = parseInt(qtyMatch[1]);
-      let name = qtyMatch[2].trim();
+      let rawName = qtyMatch[2].trim();
       const price = parseFloat(qtyMatch[3].replace(/,/g, ''));
       
-      name = this._cleanItemName(name);
+      const { cleanName, category, source } = this._cleanItemNameAndExtractCategory(rawName);
 
-      if (name.length > 1 && price > 0) {
-        return { name, price, quantity };
+      if (cleanName.length > 1 && price > 0) {
+        return { name: cleanName, price, quantity, category, source };
       }
     }
 
@@ -191,16 +192,14 @@ class BillParserService {
     for (const pattern of this.pricePatterns) {
       const match = line.match(pattern);
       if (match) {
-        let name = match[1].trim();
+        let rawName = match[1].trim();
         const price = parseFloat(match[2].replace(/,/g, ''));
 
-        name = this._cleanItemName(name);
+        const { cleanName, category, source } = this._cleanItemNameAndExtractCategory(rawName);
 
         // Validate: item name should be reasonable length, price should be positive
-        if (name.length > 1 && price > 0 && price < 100000) {
-          // If OCR merged Qty, Rate, and Amount into the name, it's fine.
-          // The cleaned name won't have them, and the extracted price is the total amount.
-          return { name, price, quantity: 1 };
+        if (cleanName.length > 1 && price > 0 && price < 100000) {
+          return { name: cleanName, price, quantity: 1, category, source };
         }
       }
     }
@@ -208,29 +207,44 @@ class BillParserService {
     return null;
   }
 
-  _cleanItemName(name) {
+  _cleanItemNameAndExtractCategory(name) {
     let clean = name.trim();
+    let category = null;
+    let source = null;
+
+    // 1. Check for injected explicit symbols or explicit text markers anywhere in the name
+    const lowerName = clean.toLowerCase();
+    if (lowerName.includes('[nv]') || lowerName.includes('(nv)') || lowerName.includes('🔴') || lowerName.includes('[non-veg]')) {
+      category = 'NON_VEG';
+      source = 'bill_symbol';
+    } else if (lowerName.includes('[v]') || lowerName.includes('(v)') || lowerName.includes('🟢') || lowerName.includes('[veg]')) {
+      category = 'VEG';
+      source = 'bill_symbol';
+    }
     
-    // Remove leading numbers, bullet points, brackets, pipes, copyright/registered symbols
+    // 2. Clean up leading numbers, bullet points, brackets, pipes, copyright/registered symbols
     clean = clean.replace(/^[\d\s\.\)\|\-\[\]©®oO0iIfFlL]+/, '');
     
-    // Remove (0), ( ), or any pure number in parens at the end
+    // 3. Remove (0), ( ), or any pure number in parens at the end
     clean = clean.replace(/\s*\(\s*\d*\s*\)$/g, ''); 
     
-    // Remove non-alphabetical trailing noise first
+    // 4. Remove explicit tags injected by OCR
+    clean = clean.replace(/(\[V\]|\[NV\]|\(V\)|\(NV\)|🟢|🔴|\[VEG\]|\[NON-VEG\])/ig, '');
+    
+    // 5. Remove non-alphabetical trailing noise first
     clean = clean.replace(/[\d\s.,!@#$%^&*_=+{}\[\]|\\:;"'<>\/?©®]+$/g, '');
     
-    // Remove isolated single/double letter artifacts (e.g., " i", " il")
+    // 6. Remove isolated single/double letter artifacts (e.g., " i", " il")
     clean = clean.replace(/\s+[iIfFlLoO0]{1,2}$/g, '');
 
-    // Remove explicit VEG/NON-VEG tags at the end
+    // 7. Remove explicit VEG/NON-VEG text tags at the end (so they don't look weird in UI)
     clean = clean.replace(/\s+(VEG|NON-VEG|NON VEG|NONVEG|NON\s*VEG)$/i, '');
     
-    // Run trailing noise cleanup again in case tags masked it
+    // 8. Run trailing noise cleanup again in case tags masked it
     clean = clean.replace(/[\d\s.,!@#$%^&*_=+{}\[\]|\\:;"'<>\/?©®]+$/g, '');
     clean = clean.replace(/\s+[iIfFlLoO0]{1,2}$/g, '');
     
-    return clean.trim();
+    return { cleanName: clean.trim(), category, source };
   }
 
   /**
