@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  SignedIn,
-  SignedOut,
   SignIn,
   UserButton,
   useUser,
@@ -32,53 +30,21 @@ function Logo() {
   );
 }
 
-// ─── Auth Screen (shown when signed out) ──────────────────────
-function AuthScreen() {
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <nav className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-3">
-          <Logo />
-          <div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">SplitBit</h1>
-            <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Split bills fairly</p>
-          </div>
-        </div>
-      </nav>
-      <main className="max-w-md mx-auto px-4 py-16">
-        <div className="text-center mb-8">
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Welcome to SplitBit</h2>
-          <p className="text-slate-500">Sign in to access your bills, groups, and expense history</p>
-        </div>
-        <SignIn
-          appearance={{
-            elements: {
-              rootBox: 'w-full',
-              card: 'shadow-sm border border-slate-200 rounded-2xl',
-              headerTitle: 'text-slate-900 font-bold',
-              formButtonPrimary: 'bg-indigo-600 hover:bg-indigo-700',
-            },
-          }}
-        />
-      </main>
-    </div>
-  );
-}
-
-// ─── Main App (shown when signed in) ──────────────────────────
+// ─── Main App (shown to all users) ──────────────────────────
 function MainApp() {
-  const { user } = useUser();
+  const { isLoaded, isSignedIn, user } = useUser();
   const { getToken } = useAuth();
   const [activeTab, setActiveTab] = useState('upload');
   const [billResult, setBillResult] = useState(null);
   const [synced, setSynced] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Register Clerk's getToken synchronously so it's available before child components mount
   setTokenProvider(getToken);
 
   // Sync Clerk user to our PostgreSQL DB on first load
   useEffect(() => {
-    if (user && !synced) {
+    if (isSignedIn && user && !synced) {
       const syncUser = async () => {
         try {
           const email = user.primaryEmailAddress?.emailAddress || user.emailAddresses[0]?.emailAddress;
@@ -92,8 +58,18 @@ function MainApp() {
         }
       };
       syncUser();
+    } else if (isLoaded && !isSignedIn) {
+      setSynced(true);
     }
-  }, [user, synced]);
+  }, [isSignedIn, user, synced, isLoaded]);
+
+  const requireAuth = () => {
+    if (!isSignedIn) {
+      setShowAuthModal(true);
+      return true;
+    }
+    return false;
+  };
 
   const handleBillProcessed = (result) => {
     setBillResult(result);
@@ -108,7 +84,7 @@ function MainApp() {
   const renderPage = () => {
     switch (activeTab) {
       case 'upload':
-        return <UploadPage onBillProcessed={handleBillProcessed} />;
+        return <UploadPage onBillProcessed={handleBillProcessed} requireAuth={requireAuth} isSignedIn={isSignedIn} />;
       case 'result':
         return (
           <ResultPage
@@ -118,19 +94,19 @@ function MainApp() {
           />
         );
       case 'history':
-        return <HistoryPage onViewBill={handleViewBill} />;
+        return <HistoryPage onViewBill={handleViewBill} isSignedIn={isSignedIn} requireAuth={requireAuth} />;
       case 'groups':
-        return <GroupsPage />;
+        return <GroupsPage requireAuth={requireAuth} isSignedIn={isSignedIn} />;
       default:
-        return <UploadPage onBillProcessed={handleBillProcessed} />;
+        return <UploadPage onBillProcessed={handleBillProcessed} requireAuth={requireAuth} isSignedIn={isSignedIn} />;
     }
   };
 
-  if (!synced) {
+  if (!isLoaded || (isSignedIn && !synced)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
         <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-500 font-medium tracking-wide">Syncing your account...</p>
+        <p className="text-slate-500 font-medium tracking-wide">Loading SplitBit...</p>
       </div>
     );
   }
@@ -164,20 +140,27 @@ function MainApp() {
                 ))}
               </div>
 
-              {/* Clerk UserButton — handles avatar, profile, and logout */}
               <div className="flex items-center gap-3">
-                <div className="hidden sm:block text-right">
-                  <p className="text-xs font-semibold text-slate-800 leading-tight">
-                    {user?.firstName || user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress}
-                  </p>
-                </div>
-                <UserButton
-                  appearance={{
-                    elements: {
-                      avatarBox: 'w-8 h-8',
-                    },
-                  }}
-                />
+                {isSignedIn ? (
+                  <>
+                    <div className="hidden sm:block text-right">
+                      <p className="text-xs font-semibold text-slate-800 leading-tight">
+                        {user?.firstName || user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress}
+                      </p>
+                    </div>
+                    <UserButton
+                      appearance={{
+                        elements: {
+                          avatarBox: 'w-8 h-8',
+                        },
+                      }}
+                    />
+                  </>
+                ) : (
+                  <button onClick={() => setShowAuthModal(true)} className="btn-primary text-sm px-4 py-2">
+                    Sign In
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -185,6 +168,23 @@ function MainApp() {
       </nav>
 
       <main className="max-w-6xl mx-auto px-4 py-8">{renderPage()}</main>
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col relative transition-all">
+            <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-white rounded-full shadow-sm text-slate-400 hover:text-slate-600 hover:bg-slate-100 z-10 transition-colors">✕</button>
+            <div className="p-6 text-center border-b border-slate-100 bg-slate-50 flex flex-col items-center">
+              <Logo />
+              <h2 className="text-xl font-bold text-slate-800 mt-4 mb-1">Welcome to SplitBit</h2>
+              <p className="text-sm text-slate-500">Log in to split your first bill on SplitBit!</p>
+            </div>
+            <div className="p-6 flex justify-center">
+              <SignIn routing="hash" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -192,13 +192,6 @@ function MainApp() {
 // ─── Root App ─────────────────────────────────────────────────
 export default function App() {
   return (
-    <>
-      <SignedOut>
-        <AuthScreen />
-      </SignedOut>
-      <SignedIn>
-        <MainApp />
-      </SignedIn>
-    </>
+    <MainApp />
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { groupApi, userApi } from '../api';
 
-export default function GroupsPage() {
+export default function GroupsPage({ requireAuth, isSignedIn }) {
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +17,10 @@ export default function GroupsPage() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const loadData = async () => {
+    if (!isSignedIn) {
+      setLoading(false);
+      return;
+    }
     try {
       const [gData, uData] = await Promise.all([groupApi.getAll(), userApi.getAll()]);
       setGroups(gData); setUsers(uData);
@@ -27,7 +31,7 @@ export default function GroupsPage() {
   useEffect(() => { 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData(); 
-  }, []);
+  }, [isSignedIn]);
 
   const handleCreateGroup = async () => {
     if (!newGroupName) return;
@@ -53,6 +57,7 @@ export default function GroupsPage() {
   };
 
   const handleAddContact = async (email) => {
+    if (requireAuth()) return;
     try {
       await userApi.addContact({ email });
       setSearchEmail(''); setSearchResults([]); setShowAddContact(false);
@@ -96,7 +101,7 @@ export default function GroupsPage() {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-slate-800">👤 Friends ({users.length})</h3>
-            <button onClick={() => setShowAddContact(!showAddContact)} className="btn-secondary text-sm">{showAddContact ? '✕ Cancel' : '+ Add Friend'}</button>
+            <button onClick={() => { if (!showAddContact && requireAuth()) return; setShowAddContact(!showAddContact); }} className="btn-secondary text-sm">{showAddContact ? '✕ Cancel' : '+ Add Friend'}</button>
           </div>
 
           {showAddContact && (
@@ -134,7 +139,7 @@ export default function GroupsPage() {
             {users.length === 0 && !showAddContact && (
               <div className="text-center p-6 bg-slate-50 border border-slate-200 border-dashed rounded-xl">
                 <p className="text-sm text-slate-500 mb-2">You haven't added any friends yet.</p>
-                <button onClick={() => setShowAddContact(true)} className="btn-secondary text-xs">Search for friends</button>
+                <button onClick={() => { if (requireAuth()) return; setShowAddContact(true); }} className="btn-secondary text-xs">Search for friends</button>
               </div>
             )}
             {users.map(u => (
@@ -158,7 +163,7 @@ export default function GroupsPage() {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-slate-800">👥 Groups ({groups.length})</h3>
-            <button onClick={() => setShowCreate(!showCreate)} className="btn-secondary text-sm">{showCreate ? '✕ Cancel' : '+ New Group'}</button>
+            <button onClick={() => { if (!showCreate && requireAuth()) return; setShowCreate(!showCreate); }} className="btn-secondary text-sm">{showCreate ? '✕ Cancel' : '+ New Group'}</button>
           </div>
 
           {showCreate && (

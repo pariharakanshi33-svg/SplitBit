@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import { billApi } from '../api';
 
-export default function HistoryPage({ onViewBill }) {
+export default function HistoryPage({ onViewBill, isSignedIn, requireAuth }) {
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ groupId: '', startDate: '', endDate: '' });
 
   const loadBills = async () => {
+    if (!isSignedIn) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const params = {};
@@ -21,7 +25,7 @@ export default function HistoryPage({ onViewBill }) {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { loadBills(); }, []);
+  useEffect(() => { loadBills(); }, [isSignedIn]);
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this bill?')) return;

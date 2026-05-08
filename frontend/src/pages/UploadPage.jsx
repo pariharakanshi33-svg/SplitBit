@@ -5,7 +5,7 @@ import ParticipantsStep from '../components/upload/ParticipantsStep';
 import SplitMethodStep from '../components/upload/SplitMethodStep';
 import AssignItemsStep from '../components/upload/AssignItemsStep';
 
-export default function UploadPage({ onBillProcessed }) {
+export default function UploadPage({ onBillProcessed, requireAuth, isSignedIn }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [users, setUsers] = useState([]);
@@ -32,6 +32,7 @@ export default function UploadPage({ onBillProcessed }) {
   const [newUserEmail, setNewUserEmail] = useState('');
 
   const loadData = async () => {
+    if (!isSignedIn) return;
     try {
       const [u, g] = await Promise.all([userApi.getAll(), groupApi.getAll()]);
       setUsers(u);
@@ -44,9 +45,13 @@ export default function UploadPage({ onBillProcessed }) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
-  }, []);
+  }, [isSignedIn]);
 
   const handleFileChange = (e) => {
+    if (requireAuth()) {
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     const f = e.target.files[0];
     if (f) {
       setFile(f);
@@ -56,6 +61,7 @@ export default function UploadPage({ onBillProcessed }) {
 
   const handleDrop = (e) => {
     e.preventDefault();
+    if (requireAuth()) return;
     const f = e.dataTransfer.files[0];
     if (f && f.type.startsWith('image/')) {
       setFile(f);
@@ -108,6 +114,7 @@ export default function UploadPage({ onBillProcessed }) {
   };
 
   const handleProceedToAssignment = async () => {
+    if (requireAuth()) return;
     setError('');
     if (useManualItems) {
       setAnalyzedItems(manualItems.filter(i => i.name && i.price).map(i => ({ name: i.name, price: parseFloat(i.price), quantity: parseInt(i.quantity) || 1 })));
